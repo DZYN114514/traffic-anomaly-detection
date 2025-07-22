@@ -1,0 +1,62 @@
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from pyod.models.ocsvm import OCSVM  # 使用PyOD的OCSVM实现
+import matplotlib.pyplot as plt
+
+
+# 1. 加载数据（假设数据无列名）
+data = pd.read_csv("C:\\Users\\46686\\Desktop\\new.txt", header=None, 
+                  names=['trip_time', 'distance'],nrows=100000)
+
+
+
+
+# 2. 数据标准化（必须步骤）
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(data[['trip_time', 'distance']])
+
+
+
+# 3. 初始化并训练PyOD的OCSVM模型
+ocsvm = OCSVM(kernel='rbf', nu=0.05  )
+ocsvm.fit(X_scaled)
+
+# 4. 预测结果
+y_pred = ocsvm.labels_     # 0=正常, 1=异常（PyOD标准输出）
+y_scores = ocsvm.decision_scores_  # 异常分数（值越大越异常）
+
+print(y_pred)
+print(y_scores)
+# 将结果添加到DataFrame
+data['is_anomaly'] = y_pred
+data['anomaly_score'] = y_scores
+
+# 5. 分析结果
+normal = data[data['is_anomaly'] == 0]
+anomalies = data[data['is_anomaly'] == 1]
+print(f"there are {len(anomalies)} anomaly points")
+print("anomaly")
+print( anomalies)
+print("normal")
+print (normal)
+# 6. 可视化
+plt.figure(figsize=(12, 7))
+# 绘制异常点（红色x标记）
+plt.scatter(anomalies['trip_time'], anomalies['distance'], 
+           c='red', s=1, label='Anomaly')
+
+# 绘制正常点（蓝色半透明小点）
+plt.scatter(normal['trip_time'], normal['distance'], 
+           c='blue', s=1, label='Normal')
+
+
+# 美化图形
+plt.xlabel('Trip Time (min)', fontsize=12)
+plt.ylabel('Distance (km)', fontsize=12)
+plt.title('Taxi Trip Anomaly Detection (PyOD OCSVM)', fontsize=14)
+plt.legend(loc='upper right')
+plt.grid(True, linestyle='--', alpha=0.3)
+
+plt.tight_layout()
+plt.show()
