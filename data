@@ -1,0 +1,39 @@
+import pandas as pd
+from math import radians, sin, cos, sqrt, asin
+
+df = pd.read_csv("C:\\Users\\46686\\Desktop\\20170301OD.txt", 
+                 header=None,
+                 names=[
+                     'taxi_id', 'pickup_time', 'pickup_lat', 'pickup_lon', 'invalid_flag_1',
+                     'dropoff_time', 'dropoff_lat', 'dropoff_lon', 'invalid_flag_2'
+                 ])
+# 计算行程耗时
+df['trip_time'] = df['dropoff_time'] - df['pickup_time']
+
+def haversine(lat1, lon1, lat2, lon2):
+    # 将十进制度数转为弧度
+    lat1=lat1/100000
+    lat2=lat2/100000
+    lon1=lon1/100000
+    lon2=lon2/100000
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+    
+    # Haversine公式
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a)) 
+    r = 6371 # 地球半径(km)
+    return c * r
+
+# 应用函数计算距离(km)
+df['distance'] = df.apply(lambda row: haversine(
+    row['pickup_lat'], row['pickup_lon'],
+    row['dropoff_lat'], row['dropoff_lon']
+), axis=1)
+
+
+selected_columns = df[[ 'trip_time','distance']] 
+selected_columns.to_csv("C:\\Users\\46686\\Desktop\\new.txt",header = False, index=False, encoding='utf-8')
+
+print(df[['taxi_id', 'pickup_time', 'dropoff_time', 'trip_time','distance']].head(10000))
