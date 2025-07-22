@@ -1,0 +1,61 @@
+import numpy as np
+import pandas as pd
+from pyod.models.auto_encoder import AutoEncoder
+from pyod.utils.data import evaluate_print
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+
+
+data = pd.read_csv("C:\\Users\\46686\\Desktop\\new.txt", header=None, names=['trip_time', 'distance'],nrows=10000 )
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(data[['trip_time', 'distance']])
+
+clf = AutoEncoder(
+    
+   
+    
+    
+    batch_size=32,
+    dropout_rate=0.2,
+    
+    contamination=0.05, 
+    verbose=1
+)
+
+
+clf.fit(X_scaled)
+y_pred = clf.predict(X_scaled)
+y_scores = clf.decision_function(X_scaled)
+
+data['is_anomaly'] = y_pred
+data['anomaly_score'] = y_scores
+
+normal = data[data['is_anomaly'] == 0]
+anomalies = data[data['is_anomaly'] == 1]
+print(f"there are {len(anomalies)} anomaly points")
+print("anomaly")
+print( anomalies)
+print("normal")
+print (normal)
+
+plt.figure(figsize=(12, 7))
+
+plt.scatter(anomalies['trip_time'], anomalies['distance'], 
+           c='red', s=1, label='Anomaly')
+
+
+plt.scatter(normal['trip_time'], normal['distance'], 
+           c='blue', s=1, label='Normal')
+
+
+
+plt.xlabel('Trip Time (min)', fontsize=12)
+plt.ylabel('Distance (km)', fontsize=12)
+plt.title('Taxi Trip Anomaly Detection (PyOD AutoEncoder)', fontsize=14)
+plt.legend(loc='upper right')
+plt.grid(True, linestyle='--', alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
