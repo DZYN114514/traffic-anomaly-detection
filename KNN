@@ -1,0 +1,60 @@
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from pyod.models.knn import KNN
+import matplotlib.pyplot as plt
+
+data = pd.read_csv("C:\\Users\\46686\\Desktop\\new.txt", header=None, names=['trip_time', 'distance'])
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(data[['trip_time', 'distance']])
+
+# 初始化KNN检测器
+knn_detector = KNN(contamination=0.05)  # contamination参数估计异常值比例
+
+# 训练模型
+knn_detector.fit(X_scaled)
+
+# 获取预测结果 (0表示正常，1表示异常)
+y_pred = knn_detector.labels_
+print(y_pred)
+
+# 获取异常分数
+y_scores = knn_detector.decision_scores_
+
+# 将结果添加到原始数据中
+
+
+data['is_anomaly'] = y_pred
+data['anomaly_score'] = y_scores
+
+normal = data[data['is_anomaly'] == 0]
+anomalies = data[data['is_anomaly'] == 1]
+print(f"there are {len(anomalies)} anomaly points")
+print("anomaly")
+print( anomalies)
+print("normal")
+print (normal)
+
+plt.figure(figsize=(12, 7))
+
+plt.scatter(anomalies['trip_time'], anomalies['distance'], 
+           c='red', s=1, label='Anomaly')
+
+
+plt.scatter(normal['trip_time'], normal['distance'], 
+           c='blue', s=1, label='Normal')
+
+
+
+plt.xlabel('Trip Time (min)', fontsize=12)
+plt.ylabel('Distance (km)', fontsize=12)
+plt.title('Taxi Trip Anomaly Detection (PyOD PCA)', fontsize=14)
+plt.legend(loc='upper right')
+plt.grid(True, linestyle='--', alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+
+
