@@ -3,31 +3,24 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from pyod.models.copod import COPOD
 import matplotlib.pyplot as plt
-
-
 # 1. 加载数据（假设数据无列名）
 data = pd.read_csv("C:\\Users\\46686\\Desktop\\new.txt", header=None, 
                   names=['trip_time', 'distance'])
-
 # 初始化COPOD模型（无需标准化，COPOD自带鲁棒性）
 clf = COPOD(
     contamination=0.05,  # 异常值比例预估
     n_jobs=-1           # 使用所有CPU核心
 )
-
-
-
-
 clf.fit(data)
 y_pred = clf.predict(data)
 y_scores = clf.decision_function(data)
 
 data['is_anomaly'] = y_pred
 data['anomaly_score'] = y_scores
-
 # 5. 分析结果
 normal = data[data['is_anomaly'] == 0]
 anomalies = data[data['is_anomaly'] == 1]
+print(f'Taxi Trip Anomaly Detection (PyOD COPOD), contamination={clf.contamination}')
 print(f"there are {len(anomalies)} anomaly points")
 print("anomaly")
 print( anomalies)
@@ -38,19 +31,14 @@ plt.figure(figsize=(12, 7))
 # 绘制异常点（红色标记）
 plt.scatter(anomalies['trip_time'], anomalies['distance'], 
            c='red', s=1, label='Anomaly')
-
 # 绘制正常点（蓝色半透明小点）
 plt.scatter(normal['trip_time'], normal['distance'], 
            c='blue', s=1, label='Normal')
-
-
 # 美化图形
 plt.xlabel('Trip Time (min)', fontsize=12)
 plt.ylabel('Distance (km)', fontsize=12)
-plt.title('Taxi Trip Anomaly Detection (PyOD COPOD)', fontsize=14)
+plt.title(f'Taxi Trip Anomaly Detection (PyOD COPOD), contamination={clf.contamination}', fontsize=14)
 plt.legend(loc='upper right')
 plt.grid(True, linestyle='--', alpha=0.3)
-
 plt.tight_layout()
 plt.show()
-
