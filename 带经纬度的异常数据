@@ -1,0 +1,108 @@
+import pandas as pd
+import numpy as np
+
+# ============================================================
+# 第一步：读取文件A和文件B
+# ============================================================
+df_a = pd.read_csv(r"C:\Users\46686\Desktop\kmeansdata.txt", 
+                   header=None, 
+                   names=['taxi_id', 'trip_time', 'distance', 'velocity', 'ifweekend', 'score', 'cluster'])
+
+col_dtypes = {
+    'taxi_id': 'category',
+    'pickup_time': 'int64',
+    'pickup_lon': 'int64',
+    'pickup_lat': 'int64',
+    'invalid_flag_1': 'int64',
+    'dropoff_time': 'int64',
+    'dropoff_lon': 'int64',
+    'dropoff_lat': 'int64',
+    'invalid_flag_2': 'int64'
+}
+
+df_b = pd.read_csv(r"C:\Users\46686\Desktop\20170301-20170315.txt", 
+                   header=None, 
+                   names=['taxi_id', 'pickup_time', 'pickup_lon', 'pickup_lat', 'invalid_flag_1',
+                          'dropoff_time', 'dropoff_lon', 'dropoff_lat', 'invalid_flag_2'],
+                   dtype=col_dtypes)
+
+# ============================================================
+# 第二步：定义计算函数（修正map错误）
+# ============================================================
+def g(lon1, lat1, lon2, lat2):
+    """Haversine距离计算（向量化版本）"""
+    lon1 = lon1 / 1e5
+    lat1 = lat1 / 1e5
+    lon2 = lon2 / 1e5
+    lat2 = lat2 / 1e5
+    
+    lon1 = np.radians(lon1)
+    lat1 = np.radians(lat1)
+    lon2 = np.radians(lon2)
+    lat2 = np.radians(lat2)
+    
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    return c * 6371
+
+# ============================================================
+# 第三步：筛选B中ID在A中存在的行
+# ============================================================
+ids_in_a = set(df_a['taxi_id'].unique())
+mask = df_b['taxi_id'].isin(ids_in_a)
+df_b_filtered = df_b[mask].copy()
+del df_b
+
+print(f"A中的ID数量: {len(ids_in_a)}")
+print(f"B中匹配上的行数: {len(df_b_filtered)}")
+
+# ============================================================
+# 第四步：计算时长和距离
+# ============================================================
+df_b_filtered['计算时长'] = df_b_filtered['dropoff_time'] - df_b_filtered['pickup_time']
+df_b_filtered['计算距离'] = g(df_b_filtered['pickup_lon'].values, 
+                           df_b_filtered['pickup_lat'].values,
+                           df_b_filtered['dropoff_lon'].values, 
+                           df_b_filtered['dropoff_lat'].values)
+
+# ============================================================
+# 第五步：字典映射代替merge
+# ============================================================
+a_dict = {}
+for _, row in df_a.iterrows():
+    a_dict[row['taxi_id']] = (row['trip_time'], row['distance'], row['score'], row['cluster'])
+
+df_b_filtered['A_时长'] = df_b_filtered['taxi_id'].map(lambda x: a_dict.get(x, (None, None, None, None))[0])
+df_b_filtered['A_距离'] = df_b_filtered['taxi_id'].map(lambda x: a_dict.get(x, (None, None, None, None))[1])
+df_b_filtered['score'] = df_b_filtered['taxi_id'].map(lambda x: a_dict.get(x, (None, None, None, None))[2])
+df_b_filtered['cluster'] = df_b_filtered['taxi_id'].map(lambda x: a_dict.get(x, (None, None, None, None))[3])
+
+# ============================================================
+# 第六步：精准筛选
+# ============================================================
+tolerance_time = 2
+tolerance_distance = 10
+
+mask_match = (
+    (df_b_filtered['A_时长'].notna()) &
+    (np.abs(df_b_filtered['计算时长'] - df_b_filtered['A_时长']) <= tolerance_time) &
+    (np.abs(df_b_filtered['计算距离'] - df_b_filtered['A_距离']) <= tolerance_distance)
+)
+
+final_result = df_b_filtered[mask_match].copy()
+final_result = final_result[['taxi_id', 'pickup_time', 'pickup_lon', 'pickup_lat', 
+                              'dropoff_time', 'dropoff_lon', 'dropoff_lat', 
+                              '计算时长', '计算距离', 'score', 'cluster']]
+final_result.to_csv(r"C:\Users\46686\Desktop\k-meansmapdata.txt", index=False, encoding='utf-8')
+print(f"匹配结果数: {len(final_result)}")
+# ============================================================
+# 第七步：检查遗漏的ID
+# ============================================================
+found_ids = set(final_result['taxi_id'].unique())
+missing_ids = set(ids_in_a) - found_ids
+
+if missing_ids:
+    print(f"警告：以下 {len(missing_ids)} 个ID在B中没有匹配的行程：")
+    print(sorted(missing_ids)[:20])  # 打印前20个
