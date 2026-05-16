@@ -1,0 +1,90 @@
+import pandas as pd
+import folium
+
+# 1. 读取你的异常数据
+df = pd.read_csv(r"C:\Users\46686\Desktop\k-meansmapdata.txt")
+df['cluster'] = df['cluster'].astype(int)
+# 经纬度换算：原始整数除以1e5转为实际度数
+df['pickup_lon_deg'] = df['pickup_lon'] / 1e5
+df['pickup_lat_deg'] = df['pickup_lat'] / 1e5
+df['dropoff_lon_deg'] = df['dropoff_lon'] / 1e5
+df['dropoff_lat_deg'] = df['dropoff_lat'] / 1e5
+
+# 打印确认前5行
+print("前5行实际坐标：")
+print(df[['pickup_lat_deg', 'pickup_lon_deg', 'dropoff_lat_deg', 'dropoff_lon_deg']].head())
+
+# 创建地图，中心定位在北京
+m = folium.Map(location=[39.9, 116.4], 
+                zoom_start=12,
+                tiles='AMAP China')  # 高德地图图源
+
+# 定义每个聚类的颜色和标签
+cluster_colors = {
+    0: {'color': '#FF6B6B', 'label': '聚类0-混合时段普通型', 'fill_color': 'red'},
+    1: {'color': '#4ECDC4', 'label': '聚类1-工作日快速出行型', 'fill_color': 'green'},
+    2: {'color': '#45B7D1', 'label': '聚类2-工作日长时通勤型', 'fill_color': 'blue'},
+    3: {'color': '#96CEB4', 'label': '聚类3-周末出行型', 'fill_color': 'black'},
+}
+
+# 每个簇随机采样（总共展示400条，各簇按比例分配）
+n_total = 4000
+df_show = df.groupby('cluster', group_keys=False).apply(
+    lambda x: x.sample(n=min(len(x), max(1, int(n_total * len(x) / len(df)))), random_state=42)
+)
+
+print("各簇展示数量：")
+print(df_show['cluster'].value_counts())
+print(df_show['cluster'].unique())
+print(df_show['cluster'].value_counts())
+# 逐个簇标注
+for cluster_id, config in cluster_colors.items():
+    df_cluster = df_show[df_show['cluster'] == cluster_id]
+    
+    if len(df_cluster) == 0:
+        continue
+    
+    # 先创建一个FeatureGroup，方便图例控制
+    fg = folium.FeatureGroup(name=config['label'])
+    
+    for idx, row in df_cluster.iterrows():
+        # 上车点
+        folium.CircleMarker(
+            location=[row['pickup_lon_deg'], row['pickup_lat_deg']],
+            radius=3,
+            color=config['color'],
+            fill=True,
+            fill_color=config['fill_color'],
+            fill_opacity=0.8,
+            stroke=False,
+            popup=f"ID: {row['taxi_id']}<br>簇: {cluster_id}<br>异常分: {row['score']:.2f}"
+        ).add_to(fg)
+        
+        # 下车点（颜色稍深，区分上下车）
+        folium.CircleMarker(
+            location=[row['dropoff_lon_deg'], row['dropoff_lat_deg']],
+            radius=4,
+            color=config['color'],
+            fill=True,
+            fill_color=config['fill_color'],
+            fill_opacity=0.8,
+            stroke=True,
+            weight=1,
+            popup=f"ID: {row['taxi_id']}<br>簇: {cluster_id}<br>异常分: {row['score']:.2f}"
+        ).add_to(fg)
+        
+        # 连接线
+        folium.PolyLine(
+            locations=[[row['pickup_lon_deg'], row['pickup_lat_deg']], 
+                       [row['dropoff_lon_deg'], row['dropoff_lat_deg']]],
+            color=config['color'], weight=2, opacity=1
+        ).add_to(fg)
+    
+    fg.add_to(m)
+
+# 添加图例（右上角可选开关）
+folium.LayerControl(collapsed=False).add_to(m)
+
+# 保存
+m.save(r'C:\Users\46686\Desktop\beijing_anomaly_map.html')
+print(f"地图已生成")
