@@ -1,0 +1,344 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+import shap
+#1. 数据预处理和合并
+# 读取数据
+KNN_data = pd.read_csv("C:/Users/46686/Desktop/KNN anomaly_data.txt", header=None)
+isolation_forest_data = pd.read_csv("C:/Users/46686/Desktop/isolation forest anomaly_data.txt", header=None)
+COPOD_data = pd.read_csv("C:/Users/46686/Desktop/COPOD anomaly_data.txt", header=None)
+HBOS_data = pd.read_csv("C:/Users/46686/Desktop/HBOS anomaly_data.txt", header=None)
+PCA_data = pd.read_csv("C:/Users/46686/Desktop/PCA anomaly_data.txt", header=None)
+
+# 为每个数据集添加列名
+columns = ['id', 'time', 'distance', 'speed', 'is_weekend', 'anomaly_score']
+KNN_data.columns = columns
+isolation_forest_data.columns = columns
+COPOD_data.columns = columns
+HBOS_data.columns = columns
+PCA_data.columns = columns
+
+# 添加算法标签
+KNN_data['algorithm'] = 'KNN'
+isolation_forest_data['algorithm'] = 'IsolationForest'
+COPOD_data['algorithm'] = 'COPOD'
+HBOS_data['algorithm'] = 'HBOS'
+PCA_data['algorithm'] = 'PCA'
+
+# 合并所有数据
+all_data = pd.concat([KNN_data, isolation_forest_data, COPOD_data, 
+                      HBOS_data, PCA_data], ignore_index=True)
+
+print("数据形状:", all_data.shape)
+print("\n各算法样本数:")
+print(all_data['algorithm'].value_counts())
+
+
+#2. 特征工程和准备
+# 选择特征列（不包括id和异常分数）
+feature_columns = ['time', 'distance', 'speed', 'is_weekend']
+
+# 为每个算法单独准备数据
+algorithms_data = {}
+for algo in all_data['algorithm'].unique():
+    algo_df = all_data[all_data['algorithm'] == algo].copy()
+    
+    # 标准化特征
+    scaler = StandardScaler()
+    algo_df[feature_columns] = scaler.fit_transform(algo_df[feature_columns])
+    
+    algorithms_data[algo] = {
+        'data': algo_df,
+        'scaler': scaler,
+        'anomaly_scores': algo_df['anomaly_score'].values
+    }
+
+print("数据预处理完成")
+
+#3. 使用SHAP分析各算法的特征重要性
+
+def analyze_algorithm_shap(algo_name, algo_info, feature_columns, n_top=1000):
+    """
+    分析单个算法的SHAP特征重要性
+    """
+    print(f"\n{'='*50}")
+    print(f"分析算法: {algo_name}")
+    print(f"{'='*50}")
+    
+    # 获取数据和异常分数
+    df = algo_info['data']
+    X = df[feature_columns].values
+    
+    # 由于是异常检测，我们需要训练一个代理模型来学习异常分数
+    # 这里使用随机森林作为代理模型
+    from sklearn.ensemble import RandomForestRegressor
+    
+    # 使用前n_top个异常分数最高的样本进行分析
+    # 因为异常检测关注的是高分异常样本
+    df_sorted = df.sort_values('anomaly_score', ascending=False)
+    top_anomalies = df_sorted.head(n_top)
+    
+    X_top = top_anomalies[feature_columns].values
+    y_top = top_anomalies['anomaly_score'].values
+    
+    # 训练代理模型
+    proxy_model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+    proxy_model.fit(X_top, y_top)
+    
+    # 创建SHAP解释器
+    explainer = shap.TreeExplainer(proxy_model)
+    
+    # 计算SHAP值
+    shap_values = explainer.shap_values(X_top)
+    
+    # 绘制SHAP summary plot
+    plt.figure(figsize=(10, 6))
+    shap.summary_plot(shap_values, X_top, feature_names=feature_columns, show=False)
+    plt.title(f'SHAP Feature Importance - {algo_name}')
+    plt.tight_layout()
+    plt.savefig(f'shap_summary_{algo_name}.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    # 计算平均绝对SHAP值
+    mean_shap = np.abs(shap_values).mean(axis=0)
+    feature_importance = pd.DataFrame({
+        'feature': feature_columns,
+        'mean_shap': mean_shap,
+        'algorithm': algo_name
+    }).sort_values('mean_shap', ascending=False)
+    
+    print(f"\n{algo_name} 特征重要性:")
+    print(feature_importance)
+    
+    # 创建特征依赖图
+    for i, feature in enumerate(feature_columns):
+        plt.figure(figsize=(8, 5))
+        shap.dependence_plot(i, shap_values, X_top, 
+                            feature_names=feature_columns, show=False)
+        plt.title(f'{algo_name} - {feature} Dependence Plot')
+        plt.tight_layout()
+        plt.savefig(f'shap_dependence_{algo_name}_{feature}.png', dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    return {
+        'shap_values': shap_values,
+        'feature_importance': feature_importance,
+        'proxy_model': proxy_model
+    }
+
+# 分析所有算法
+results = {}
+for algo_name, algo_info in algorithms_data.items():
+    results[algo_name] = analyze_algorithm_shap(algo_name, algo_info, feature_columns)
+
+#4. 对比各算法的特征重要性
+
+# 合并所有算法的特征重要性
+all_importance = pd.concat([res['feature_importance'] for res in results.values()], 
+                          ignore_index=True)
+
+# 绘制对比图
+plt.figure(figsize=(12, 8))
+sns.barplot(data=all_importance, x='mean_shap', y='feature', hue='algorithm')
+plt.title('Feature Importance Comparison Across Algorithms')
+plt.xlabel('Mean |SHAP Value|')
+plt.tight_layout()
+plt.savefig('feature_importance_comparison.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+# 创建热力图对比
+importance_matrix = all_importance.pivot(index='feature', 
+                                         columns='algorithm', 
+                                         values='mean_shap')
+importance_matrix = importance_matrix.fillna(0)
+
+plt.figure(figsize=(10, 6))
+sns.heatmap(importance_matrix, annot=True, fmt='.3f', cmap='YlOrRd', 
+            center=0, square=True)
+plt.title('Feature Importance Heatmap Across Algorithms')
+plt.tight_layout()
+plt.savefig('importance_heatmap.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+def analyze_anomaly_definition(algorithms_data, feature_columns, n_anomalies=500):
+    """
+    分析各算法识别的异常样本的特征分布
+    """
+    anomaly_profiles = {}
+    
+    for algo_name, algo_info in algorithms_data.items():
+        df = algo_info['data']
+        
+        # 获取前n_anomalies个异常分数最高的样本
+        top_anomalies = df.sort_values('anomaly_score', ascending=False).head(n_anomalies)
+        
+        # 计算特征统计
+        feature_stats = []
+        for feature in feature_columns:
+            # 获取所有样本的特征分布
+            all_values = df[feature].values
+            anomaly_values = top_anomalies[feature].values
+            
+            # 计算异常样本的特征百分位数
+            percentile = np.percentile(all_values, np.linspace(0, 100, 101))
+            anomaly_percentiles = [np.searchsorted(percentile, val) / 100 
+                                  for val in anomaly_values]
+            
+            feature_stats.append({
+                'feature': feature,
+                'mean_anomaly': np.mean(anomaly_values),
+                'std_anomaly': np.std(anomaly_values),
+                'mean_all': np.mean(all_values),
+                'std_all': np.std(all_values),
+                'mean_percentile': np.mean(anomaly_percentiles),
+                'direction': 'high' if np.mean(anomaly_values) > np.mean(all_values) else 'low'
+            })
+        
+        anomaly_profiles[algo_name] = pd.DataFrame(feature_stats)
+        
+        # 可视化异常样本的特征分布
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        axes = axes.flatten()
+        
+        for idx, feature in enumerate(feature_columns):
+            ax = axes[idx]
+            
+            # 绘制所有样本的分布
+            ax.hist(df[feature], bins=50, alpha=0.5, label='All Samples', color='blue')
+            
+            # 绘制异常样本的分布
+            ax.hist(top_anomalies[feature], bins=30, alpha=0.5, 
+                   label='Top Anomalies', color='red')
+            
+            ax.set_xlabel(feature)
+            ax.set_ylabel('Frequency')
+            ax.set_title(f'{algo_name} - {feature}')
+            ax.legend()
+        
+        plt.suptitle(f'{algo_name} - Anomaly Feature Distribution', fontsize=14)
+        plt.tight_layout()
+        plt.savefig(f'anomaly_distribution_{algo_name}.png', dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        # 打印特征分析结果
+        print(f"\n{algo_name} 异常特征分析:")
+        print(anomaly_profiles[algo_name].to_string())
+    
+    return anomaly_profiles
+
+# 执行分析
+anomaly_profiles = analyze_anomaly_definition(algorithms_data, feature_columns)
+
+
+def create_comparison_summary(results, anomaly_profiles):
+    """
+    创建算法对比总结
+    """
+    summary = []
+    
+    for algo_name in results.keys():
+        # 获取特征重要性排序
+        importance = results[algo_name]['feature_importance']
+        top_features = importance['feature'].iloc[:2].tolist()
+        
+        # 获取异常特征方向
+        profile = anomaly_profiles[algo_name]
+        
+        feature_directions = {}
+        for _, row in profile.iterrows():
+            feature_directions[row['feature']] = row['direction']
+        
+        summary.append({
+            'Algorithm': algo_name,
+            'Top Features': ', '.join(top_features),
+            'Top Feature Importance': f"{importance.iloc[0]['mean_shap']:.3f}",
+            'Anomaly Direction': ', '.join([f"{k}:{v}" for k, v in feature_directions.items()]),
+            'Interpretation': get_algorithm_interpretation(algo_name, top_features, feature_directions)
+        })
+    
+    summary_df = pd.DataFrame(summary)
+    
+    # 保存总结
+    summary_df.to_csv('algorithm_comparison_summary.csv', index=False)
+    
+    print("\n" + "="*80)
+    print("算法对比总结:")
+    print("="*80)
+    print(summary_df.to_string())
+    
+    return summary_df
+
+def get_algorithm_interpretation(algo_name, top_features, directions):
+    """
+    为每个算法生成解释
+    """
+    interpretations = {
+        'KNN': f"KNN主要依赖{top_features[0]}和{top_features[1]}判断异常，"
+               f"异常样本通常具有{directions.get(top_features[0], '')}的{top_features[0]} "
+               f"和{directions.get(top_features[1], '')}的{top_features[1]}",
+        
+        'IsolationForest': f"Isolation Forest主要依赖{top_features[0]}和{top_features[1]}，"
+                          f"倾向于将{directions.get(top_features[0], '')}的{top_features[0]} "
+                          f"和{directions.get(top_features[1], '')}的{top_features[1]}识别为异常",
+        
+        'COPOD': f"COPOD主要基于{top_features[0]}和{top_features[1]}的极值判断，"
+                f"异常样本通常在{top_features[0]}上{directions.get(top_features[0], '')}，"
+                f"在{top_features[1]}上{directions.get(top_features[1], '')}",
+        
+        'HBOS': f"HBOS依赖直方图统计，对{top_features[0]}和{top_features[1]}的异常值敏感，"
+               f"异常样本常出现在{directions.get(top_features[0], '')}的{top_features[0]} "
+               f"和{directions.get(top_features[1], '')}的{top_features[1]}区域",
+        
+        'PCA': f"PCA基于重构误差，异常样本在{top_features[0]}和{top_features[1]}上偏离主成分空间，"
+              f"表现出{directions.get(top_features[0], '')}的{top_features[0]} "
+              f"和{directions.get(top_features[1], '')}的{top_features[1]}特征"
+    }
+    
+    return interpretations.get(algo_name, "需要进一步分析")
+
+# 生成总结
+summary = create_comparison_summary(results, anomaly_profiles)
+
+
+def analyze_feature_interaction(algorithms_data, feature_columns):
+    """
+    分析特征交互作用
+    """
+    for algo_name, algo_info in algorithms_data.items():
+        df = algo_info['data']
+        
+        # 创建特征交互图
+        fig, axes = plt.subplots(len(feature_columns), len(feature_columns), 
+                                 figsize=(15, 15))
+        
+        for i, feat1 in enumerate(feature_columns):
+            for j, feat2 in enumerate(feature_columns):
+                ax = axes[i, j]
+                
+                if i == j:
+                    # 对角线：显示特征分布和异常分数
+                    scatter = ax.scatter(df[feat1], df['anomaly_score'], 
+                                       c=df['anomaly_score'], cmap='viridis', 
+                                       alpha=0.5, s=10)
+                    ax.set_xlabel(feat1)
+                    ax.set_ylabel('Anomaly Score')
+                else:
+                    # 非对角线：显示特征关系
+                    scatter = ax.scatter(df[feat1], df[feat2], 
+                                       c=df['anomaly_score'], cmap='viridis', 
+                                       alpha=0.5, s=10)
+                    ax.set_xlabel(feat1)
+                    ax.set_ylabel(feat2)
+                
+                ax.set_title(f'{algo_name}')
+        
+        plt.suptitle(f'{algo_name} - Feature Interactions and Anomaly Scores', fontsize=14)
+        plt.tight_layout()
+        plt.savefig(f'feature_interactions_{algo_name}.png', dpi=300, bbox_inches='tight')
+        plt.show()
+
+# 执行分析
+analyze_feature_interaction(algorithms_data, feature_columns)
