@@ -1,0 +1,177 @@
+import pandas as pd
+import numpy as np
+from scipy.stats import mstats, kendalltau
+from scipy.stats import chi2  # 导入chi2分布
+
+def calculate_kendalls_w(data_dict):
+    """
+    计算肯德尔和谐系数
+    """
+    # 获取所有方法的异常分数（第6列，索引5）
+    scores = []
+    method_names = []
+    
+    for name, df in data_dict.items():
+        score = df.iloc[:, 5].values  # 假设异常分数在第6列
+        scores.append(score)
+        method_names.append(name)
+    
+    m = len(method_names)  # 评价者数量
+    n = len(scores[0])     # 样本数量
+    
+    print(f"\n评价方法数: {m}")
+    print(f"样本数量: {n}")
+    
+    # 创建排名矩阵
+    ranks = np.zeros((m, n))
+    
+    # 计算每个方法的排名
+    for i, score in enumerate(scores):
+        ranks[i, :] = mstats.rankdata(score)
+        print(f"{method_names[i]} 异常分数范围: [{score.min():.4f}, {score.max():.4f}]")
+    
+    # 计算每个样本的总排名
+    sum_ranks = np.sum(ranks, axis=0)
+    
+    # 计算肯德尔和谐系数
+    sum_R_squared = np.sum(sum_ranks ** 2)
+    
+    W = (12 * sum_R_squared - 3 * m**2 * n * (n + 1)**2) / (m**2 * n * (n**2 - 1))
+    
+    # 计算卡方统计量 - 注意不要命名为chi2，避免与函数冲突
+    chi2_stat = m * (n - 1) * W
+    # 自由度
+    df = n - 1
+    # p值 - 使用导入的chi2函数
+    p_value = 1 - chi2.cdf(chi2_stat, df)
+    
+    return W, chi2_stat, p_value, df, ranks, sum_ranks
+
+# 读取数据
+print("正在读取数据...")
+
+data = {}
+
+data['KNN'] = pd.read_csv(r"C:\Users\46686\Desktop\KNN anomaly_data.txt", header=None, nrows=173793)
+data['IsolationForest'] = pd.read_csv(r"C:\Users\46686\Desktop\isolation forest anomaly_data.txt", header=None, nrows=173793)
+data['COPOD'] = pd.read_csv(r"C:\Users\46686\Desktop\COPOD anomaly_data.txt", header=None, nrows=173793)
+data['HBOS'] = pd.read_csv(r"C:\Users\46686\Desktop\HBOS anomaly_data.txt", header=None, nrows=173793)
+data['PCA'] = pd.read_csv(r"C:\Users\46686\Desktop\PCA anomaly_data.txt", header=None, nrows=173793)
+
+# 添加列名
+for name, df in data.items():
+    df.columns = ['id', 'time', 'distance', 'speed', 'is_weekend', 'anomaly_score']
+
+print("数据读取完成\n")
+
+# 验证数据形状
+print("=" * 60)
+print("数据形状检查")
+print("=" * 60)
+for name, df in data.items():
+    print(f"{name}: {df.shape[0]} 行, {df.shape[1]} 列")
+
+# 计算肯德尔和谐系数
+print("\n" + "=" * 60)
+print("计算肯德尔和谐系数 (Kendall's W)")
+print("=" * 60)
+
+# 注意：这里接收的变量名不要与chi2函数冲突
+W, chi2_stat, p_value, df, ranks, sum_ranks = calculate_kendalls_w(data)
+
+print("\n" + "=" * 60)
+print("肯德尔和谐系数结果")
+print("=" * 60)
+print(f"肯德尔和谐系数 (W): {W:.6f}")
+print(f"卡方统计量 (χ²): {chi2_stat:.4f}")
+print(f"自由度: {df}")
+print(f"p值: {p_value:.10f}")
+
+# 解释结果
+print("\n" + "=" * 60)
+print("结果解释")
+print("=" * 60)
+print(f"W值范围: 0-1")
+print(f"W = 1: 完全一致")
+print(f"W = 0: 完全不一致")
+
+if p_value < 0.05:
+    print(f"\n✓ 在显著性水平α=0.05下，p值({p_value:.6f}) < 0.05")
+    print("  拒绝零假设，说明五个方法的排序存在显著一致性")
+else:
+    print(f"\n✗ 在显著性水平α=0.05下，p值({p_value:.6f}) >= 0.05")
+    print("  接受零假设，说明五个方法的排序一致性不显著")
+
+print(f"\n一致性程度: ", end="")
+if W >= 0.9:
+    print("非常高的一致性 (Excellent agreement)")
+elif W >= 0.7:
+    print("较高的一致性 (Good agreement)")
+elif W >= 0.5:
+    print("中等一致性 (Moderate agreement)")
+elif W >= 0.3:
+    print("较低的一致性 (Low agreement)")
+else:
+    print("非常低的一致性 (Poor agreement)")
+
+# 两两相关性分析
+def pairwise_kendall_tau(data_dict):
+    """
+    计算所有方法对之间的肯德尔秩相关系数
+    """
+    method_names = list(data_dict.keys())
+    n_methods = len(method_names)
+    
+    tau_matrix = pd.DataFrame(np.zeros((n_methods, n_methods)), 
+                              index=method_names, 
+                              columns=method_names)
+    p_matrix = pd.DataFrame(np.zeros((n_methods, n_methods)), 
+                            index=method_names, 
+                            columns=method_names)
+    
+    for i, name1 in enumerate(method_names):
+        for j, name2 in enumerate(method_names):
+            if i <= j:
+                score1 = data_dict[name1]['anomaly_score'].values
+                score2 = data_dict[name2]['anomaly_score'].values
+                tau, p_val = kendalltau(score1, score2)
+                tau_matrix.iloc[i, j] = tau
+                tau_matrix.iloc[j, i] = tau
+                p_matrix.iloc[i, j] = p_val
+                p_matrix.iloc[j, i] = p_val
+    
+    return tau_matrix, p_matrix
+
+# 计算两两之间的Kendall's τ
+print("\n" + "=" * 60)
+print("两两方法间的Kendall's τ相关系数矩阵")
+print("=" * 60)
+
+tau_matrix, p_matrix = pairwise_kendall_tau(data)
+
+print("\nKendall's τ 相关系数:")
+print(tau_matrix.round(4))
+
+print("\n显著性p值 (p < 0.05 表示显著相关):")
+print(p_matrix.round(6))
+
+# 显示每个方法的统计描述
+print("\n" + "=" * 60)
+print("各方法异常分数统计描述")
+print("=" * 60)
+
+stats_df = pd.DataFrame()
+for name, df in data.items():
+    stats_df[name] = df['anomaly_score']
+    
+print(stats_df.describe().round(6))
+
+# 显示排名最高的前10个样本
+print("\n" + "=" * 60)
+print("各方法排名前10的异常样本ID")
+print("=" * 60)
+
+for name, df in data.items():
+    top_10 = df.nlargest(10, 'anomaly_score')[['id', 'anomaly_score']]
+    print(f"\n{name}:")
+    print(top_10.to_string(index=False))
