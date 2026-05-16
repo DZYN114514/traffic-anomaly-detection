@@ -1,0 +1,113 @@
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from upsetplot import UpSet
+from itertools import combinations
+
+# 1. 读取数据
+# 注意：文件路径使用正斜杠或双反斜杠
+KNN_data = pd.read_csv("C:/Users/46686/Desktop/KNN anomaly_data.txt", header=None)
+isolation_forest_data = pd.read_csv("C:/Users/46686/Desktop/isolation forest anomaly_data.txt", header=None)
+COPOD_data = pd.read_csv("C:/Users/46686/Desktop/COPOD anomaly_data.txt", header=None)
+HBOS_data = pd.read_csv("C:/Users/46686/Desktop/HBOS anomaly_data.txt", header=None)
+PCA_data = pd.read_csv("C:/Users/46686/Desktop/PCA anomaly_data.txt", header=None)
+
+
+# 2. 提取异常ID（假设第一列是id，或根据实际调整列位置）
+# 根据你的数据格式，可能需要调整列索引
+# 假设每行数据格式：id,时间,距离,速度,是否为周末,异常分数
+# 那么id在第0列（第一列）
+
+KNN_ids = set(KNN_data.iloc[:, 0].tolist())  # 提取第一列作为id
+isolation_forest_ids = set(isolation_forest_data.iloc[:, 0].tolist())
+COPOD_ids = set(COPOD_data.iloc[:, 0].tolist())
+HBOS_ids = set(HBOS_data.iloc[:, 0].tolist())
+PCA_ids = set(PCA_data.iloc[:, 0].tolist())
+
+# 如果id列不是第一列，调整索引，例如：
+# KNN_ids = set(KNN_data.iloc[:, 1].tolist())  # 第二列
+# 或根据列名：
+# KNN_ids = set(KNN_data['id'].tolist())
+
+# 3. 组织结果字典
+results = {
+    'KNN': KNN_ids,
+    'iForest': isolation_forest_ids,
+    'HBOS': HBOS_ids,
+    'COPOD': COPOD_ids,
+    'PCA': PCA_ids
+}
+
+print("Number of anomalies detected by each method:")
+for method, ids in results.items():
+    print(f"{method}: {len(ids)}")
+
+# 4. 计算Jaccard相似度矩阵
+n_methods = len(results)
+method_names = list(results.keys())
+jaccard_matrix = np.zeros((n_methods, n_methods))
+
+for i, method_i in enumerate(method_names):
+    for j, method_j in enumerate(method_names):
+        set_i = results[method_i]
+        set_j = results[method_j]
+        intersection = len(set_i & set_j)
+        union = len(set_i | set_j)
+        jaccard_matrix[i, j] = intersection / union if union > 0 else 0
+
+# 转换为DataFrame
+jaccard_df = pd.DataFrame(jaccard_matrix, 
+                          index=method_names, 
+                          columns=method_names)
+
+# 5. 可视化Jaccard热力图
+plt.figure(figsize=(10, 8))
+sns.heatmap(jaccard_df, 
+            annot=True, 
+            fmt='.3f', 
+            cmap='YlOrRd',
+            vmin=0, 
+            vmax=1,
+            square=True,
+            annot_kws={'size': 12})
+plt.title('Jaccard Similarity Between Anomaly Detection Methods', fontsize=14)
+plt.tight_layout()
+plt.savefig('jaccard_heatmap.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+print("\nJaccard Similarity Matrix:")
+print(jaccard_df.round(3))
+
+# 6. 计算广义Jaccard（所有方法的交集/并集）
+all_intersection = set.intersection(*results.values())
+all_union = set.union(*results.values())
+generalized_jaccard = len(all_intersection) / len(all_union) if len(all_union) > 0 else 0
+
+print(f"\nNumber of anomalies common to all methods: {len(all_intersection)}")
+print(f"Total number of unique anomalies across all methods: {len(all_union)}")
+print(f"Generalized Jaccard Similarity: {generalized_jaccard:.4f}")
+
+# 7. 计算各方法的独有异常比例
+print("\nNumber and proportion of unique anomalies by method:")
+for method, ids in results.items():
+    # 计算该方法独有，其他方法都没有的异常
+    others_union = set.union(*[results[m] for m in method_names if m != method])
+    unique_ids = ids - others_union
+    unique_ratio = len(unique_ids) / len(ids) if len(ids) > 0 else 0
+    print(f"{method}: {len(unique_ids)} ({unique_ratio:.2%})")
+
+# 8. 计算两两方法的Jaccard（详细输出）
+print("\nPairwise Method Jaccard Similarity (Top 10):")
+pairs = []
+for i, j in combinations(range(n_methods), 2):
+    method_i = method_names[i]
+    method_j = method_names[j]
+    jaccard = jaccard_matrix[i, j]
+    pairs.append((f"{method_i} & {method_j}", jaccard))
+
+# 按相似度排序
+pairs_sorted = sorted(pairs, key=lambda x: x[1], reverse=True)
+for pair, jaccard in pairs_sorted[:10]:
+    print(f"{pair}: {jaccard:.4f}")
+
